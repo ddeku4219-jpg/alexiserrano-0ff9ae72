@@ -18,8 +18,9 @@ const MatrixRain = () => {
 
     const chars = "01アイウエオカキクケコサシスセソ";
     const fontSize = 14;
-    const columns = Math.floor(canvas.width / fontSize);
-    const drops = Array(columns).fill(1);
+    // Limit columns on low-end Chromebooks for performance
+    const maxCols = Math.min(Math.floor(canvas.width / fontSize), 120);
+    const drops = Array(maxCols).fill(1);
 
     const draw = () => {
       ctx.fillStyle = "rgba(8, 12, 18, 0.05)";
@@ -39,7 +40,8 @@ const MatrixRain = () => {
       ctx.globalAlpha = 1;
     };
 
-    const interval = setInterval(draw, 50);
+    // Slower interval for Chromebook performance
+    const interval = setInterval(draw, 66);
     return () => {
       clearInterval(interval);
       window.removeEventListener("resize", resize);

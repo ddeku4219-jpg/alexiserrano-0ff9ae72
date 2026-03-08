@@ -123,11 +123,7 @@ serve(async (req) => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20000);
 
-    // Use a text-browser user-agent for Google to get basic HTML results
-    const isGoogle = targetUrl.includes("google.com/search");
-    const headers = isGoogle
-      ? { "User-Agent": "Lynx/2.8.9rel.1 libwww-FM/2.14 SSL-MM/1.4.1 OpenSSL/1.1.1", "Accept": "text/html", "Accept-Language": "en-US,en;q=0.9" }
-      : getHeaders();
+    const headers = getHeaders();
 
     const response = await fetch(targetUrl, {
       headers,

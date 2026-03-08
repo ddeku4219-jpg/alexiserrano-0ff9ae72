@@ -4,41 +4,51 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
 interface ProxyViewerProps {
-  html: string;
-  url: string;
+  proxyUrl: string;
+  targetUrl: string;
   onClose: () => void;
 }
 
-const ProxyViewer = ({ html, url, onClose }: ProxyViewerProps) => {
-  const [currentUrl, setCurrentUrl] = useState(url);
-  const [currentHtml, setCurrentHtml] = useState(html);
-  const [isLoading, setIsLoading] = useState(false);
-  const [history, setHistory] = useState<{ html: string; url: string }[]>([{ html, url }]);
+const ProxyViewer = ({ proxyUrl, targetUrl, onClose }: ProxyViewerProps) => {
+  const [currentTargetUrl, setCurrentTargetUrl] = useState(targetUrl);
+  const [isLoading, setIsLoading] = useState(true);
+  const [history, setHistory] = useState<{ proxyUrl: string; targetUrl: string }[]>([{ proxyUrl, targetUrl }]);
   const [historyIndex, setHistoryIndex] = useState(0);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
-  const navigateTo = useCallback(async (targetUrl: string) => {
+  // Load HTML via fetch (with auth) then write into iframe document
+  const loadUrl = useCallback(async (pUrl: string, tUrl: string, addToHistory = true) => {
     setIsLoading(true);
     try {
-      const { data, error } = await supabase.functions.invoke("proxy-fetch", {
-        body: { url: targetUrl },
+      // Fetch the proxied page via the proxy URL (GET mode)
+      const response = await fetch(pUrl, {
+        headers: {
+          "Authorization": `Bearer ${(await supabase.auth.getSession()).data.session?.access_token || ""}`,
+          "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        },
       });
 
-      if (error) throw error;
-      if (data?.error) {
-        toast.error(data.error);
-        return;
-      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-      if (data?.html) {
-        const newEntry = { html: data.html, url: data.finalUrl };
-        const newHistory = [...history.slice(0, historyIndex + 1), newEntry];
+      const html = await response.text();
+
+      if (addToHistory) {
+        const newHistory = [...history.slice(0, historyIndex + 1), { proxyUrl: pUrl, targetUrl: tUrl }];
         setHistory(newHistory);
         setHistoryIndex(newHistory.length - 1);
-        setCurrentHtml(data.html);
-        setCurrentUrl(data.finalUrl);
-      } else {
-        toast.info(`Non-HTML content: ${data?.contentType}`);
+      }
+
+      setCurrentTargetUrl(tUrl);
+
+      // Write HTML directly into iframe document so JS executes
+      const iframe = iframeRef.current;
+      if (iframe) {
+        const doc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (doc) {
+          doc.open();
+          doc.write(html);
+          doc.close();
+        }
       }
     } catch (err: any) {
       toast.error(err.message || "Failed to load page");
@@ -47,143 +57,61 @@ const ProxyViewer = ({ html, url, onClose }: ProxyViewerProps) => {
     }
   }, [history, historyIndex]);
 
+  // Initial load
+  useEffect(() => {
+    loadUrl(proxyUrl, targetUrl, false);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Listen for navigation messages from iframe
+  useEffect(() => {
+    const handler = (e: MessageEvent) => {
+      if (e.data?.type === "proxy-navigate" && e.data.url) {
+        loadUrl(e.data.url, e.data.targetUrl || e.data.url);
+      }
+    };
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, [loadUrl]);
+
   const goBack = () => {
     if (historyIndex > 0) {
-      const newIndex = historyIndex - 1;
-      setHistoryIndex(newIndex);
-      setCurrentHtml(history[newIndex].html);
-      setCurrentUrl(history[newIndex].url);
+      const prev = history[historyIndex - 1];
+      setHistoryIndex(historyIndex - 1);
+      loadUrl(prev.proxyUrl, prev.targetUrl, false);
     }
   };
 
   const goForward = () => {
     if (historyIndex < history.length - 1) {
-      const newIndex = historyIndex + 1;
-      setHistoryIndex(newIndex);
-      setCurrentHtml(history[newIndex].html);
-      setCurrentUrl(history[newIndex].url);
+      const next = history[historyIndex + 1];
+      setHistoryIndex(historyIndex + 1);
+      loadUrl(next.proxyUrl, next.targetUrl, false);
     }
   };
-
-  // Inject a script that intercepts link clicks and posts messages to the parent
-  const injectedHtml = currentHtml.replace(
-    "</body>",
-    `<script>
-      function extractRealUrl(href) {
-        try {
-          var u = new URL(href);
-          // DuckDuckGo redirect links
-          if (u.hostname.includes('duckduckgo.com') && u.pathname === '/l/') {
-            var uddg = u.searchParams.get('uddg');
-            if (uddg) return uddg;
-          }
-          // Google redirect links
-          if (u.hostname.includes('google.com') && u.pathname === '/url') {
-            var q = u.searchParams.get('q') || u.searchParams.get('url');
-            if (q) return q;
-          }
-        } catch(e) {}
-        return href;
-      }
-      document.addEventListener('click', function(e) {
-        var link = e.target.closest('a');
-        if (link && link.href && !link.href.startsWith('javascript:') && !link.href.startsWith('#')) {
-          e.preventDefault();
-          e.stopPropagation();
-          var realUrl = extractRealUrl(link.href);
-          window.parent.postMessage({ type: 'proxy-navigate', url: realUrl }, '*');
-        }
-      }, true);
-      document.addEventListener('submit', function(e) {
-        var form = e.target;
-        // Allow DuckDuckGo search form submissions
-        if (form.action && form.action.includes('duckduckgo.com')) {
-          e.preventDefault();
-          var formData = new FormData(form);
-          var q = formData.get('q');
-          if (q) {
-            window.parent.postMessage({ type: 'proxy-navigate', url: 'https://lite.duckduckgo.com/lite/?q=' + encodeURIComponent(q) }, '*');
-          }
-          return;
-        }
-        e.preventDefault();
-        window.parent.postMessage({ type: 'proxy-alert', message: 'Form submissions are not supported through the proxy.' }, '*');
-      }, true);
-    </script></body>`
-  );
-
-  // Listen for messages from the iframe
-  useEffect(() => {
-    const handler = (e: MessageEvent) => {
-      if (e.data?.type === 'proxy-navigate' && e.data.url) {
-        navigateTo(e.data.url);
-      }
-      if (e.data?.type === 'proxy-alert') {
-        toast.info(e.data.message);
-      }
-    };
-    window.addEventListener('message', handler);
-    return () => window.removeEventListener('message', handler);
-  }, [navigateTo]);
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background">
       {/* Toolbar */}
       <div className="flex items-center gap-1.5 px-3 py-2 bg-card border-b border-border">
-        <button
-          onClick={onClose}
-          className="p-1.5 rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
-          title="Close"
-        >
+        <button onClick={onClose} className="p-1.5 rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground" title="Close">
           <X className="w-4 h-4" />
         </button>
-
-        <button
-          onClick={goBack}
-          disabled={historyIndex <= 0}
-          className="p-1.5 rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground disabled:opacity-30"
-          title="Back"
-        >
+        <button onClick={goBack} disabled={historyIndex <= 0} className="p-1.5 rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground disabled:opacity-30" title="Back">
           <ArrowLeft className="w-4 h-4" />
         </button>
-
-        <button
-          onClick={goForward}
-          disabled={historyIndex >= history.length - 1}
-          className="p-1.5 rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground disabled:opacity-30"
-          title="Forward"
-        >
+        <button onClick={goForward} disabled={historyIndex >= history.length - 1} className="p-1.5 rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground disabled:opacity-30" title="Forward">
           <ArrowRight className="w-4 h-4" />
         </button>
-
-        <button
-          onClick={() => navigateTo(currentUrl)}
-          disabled={isLoading}
-          className="p-1.5 rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
-          title="Reload"
-        >
+        <button onClick={() => loadUrl(history[historyIndex].proxyUrl, history[historyIndex].targetUrl, false)} className="p-1.5 rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground" title="Reload">
           <RotateCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
         </button>
-
-        <button
-          onClick={onClose}
-          className="p-1.5 rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
-          title="Home"
-        >
+        <button onClick={onClose} className="p-1.5 rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground" title="Home">
           <Home className="w-4 h-4" />
         </button>
-
         <div className="flex-1 px-3 py-1.5 bg-secondary rounded-md font-mono text-xs text-secondary-foreground truncate mx-1">
-          {isLoading ? "Loading..." : currentUrl}
+          {isLoading ? "Loading..." : currentTargetUrl}
         </div>
-
-        <a
-          href={currentUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="p-1.5 rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
-          title="Open in new tab"
-        >
+        <a href={currentTargetUrl} target="_blank" rel="noopener noreferrer" className="p-1.5 rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground" title="Open in new tab">
           <ExternalLink className="w-4 h-4" />
         </a>
       </div>
@@ -195,12 +123,11 @@ const ProxyViewer = ({ html, url, onClose }: ProxyViewerProps) => {
         </div>
       )}
 
-      {/* Content */}
+      {/* Content iframe - blank initially, written to via document.write */}
       <iframe
         ref={iframeRef}
-        srcDoc={injectedHtml}
         className="flex-1 w-full bg-white"
-        sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-modals"
+        sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-modals allow-presentation"
         title="Proxied content"
         referrerPolicy="no-referrer"
       />

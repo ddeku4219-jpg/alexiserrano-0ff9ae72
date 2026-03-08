@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 
 interface ProxyInputProps {
-  onResult?: (html: string, url: string) => void;
+  onResult?: (proxyUrl: string, targetUrl: string) => void;
   onLoading?: (loading: boolean) => void;
 }
 
@@ -49,11 +49,9 @@ const ProxyInput = ({ onResult, onLoading }: ProxyInputProps) => {
 
       if (data?.error) {
         toast.error(data.error);
-      } else if (data?.html) {
-        toast.success(shouldSearch ? `Search: ${trimmed}` : `Loaded: ${data.finalUrl}`);
-        onResult?.(data.html, data.finalUrl);
-      } else {
-        toast.info(`Non-HTML content: ${data?.contentType} (${data?.size} bytes)`);
+      } else if (data?.proxyUrl) {
+        toast.success(shouldSearch ? `Search: ${trimmed}` : `Loading: ${data.targetUrl}`);
+        onResult?.(data.proxyUrl, data.targetUrl);
       }
     } catch (err: any) {
       toast.error(err.message || "Failed to proxy request");

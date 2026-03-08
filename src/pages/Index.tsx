@@ -8,7 +8,7 @@ import QuickLinks from "@/components/QuickLinks";
 import { Shield } from "lucide-react";
 
 const Index = () => {
-  const [proxyResult, setProxyResult] = useState<{ html: string; url: string } | null>(null);
+  const [proxyResult, setProxyResult] = useState<{ proxyUrl: string; targetUrl: string } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
   const navigateTo = useCallback(async (url: string) => {
@@ -20,8 +20,8 @@ const Index = () => {
       if (error) throw error;
       if (data?.error) {
         toast.error(data.error);
-      } else if (data?.html) {
-        setProxyResult({ html: data.html, url: data.finalUrl });
+      } else if (data?.proxyUrl) {
+        setProxyResult({ proxyUrl: data.proxyUrl, targetUrl: data.targetUrl });
       }
     } catch (err: any) {
       toast.error(err.message || "Failed to load");
@@ -52,7 +52,7 @@ const Index = () => {
         </div>
 
         <ProxyInput
-          onResult={(html, url) => setProxyResult({ html, url })}
+          onResult={(proxyUrl, targetUrl) => setProxyResult({ proxyUrl, targetUrl })}
         />
 
         <QuickLinks onNavigate={navigateTo} isLoading={isLoading} />
@@ -81,8 +81,8 @@ const Index = () => {
 
       {proxyResult && (
         <ProxyViewer
-          html={proxyResult.html}
-          url={proxyResult.url}
+          proxyUrl={proxyResult.proxyUrl}
+          targetUrl={proxyResult.targetUrl}
           onClose={() => setProxyResult(null)}
         />
       )}

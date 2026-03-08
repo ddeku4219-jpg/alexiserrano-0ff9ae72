@@ -1,11 +1,34 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
+import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 import ProxyInput from "@/components/ProxyInput";
 import ProxyViewer from "@/components/ProxyViewer";
 import MatrixRain from "@/components/MatrixRain";
+import QuickLinks from "@/components/QuickLinks";
 import { Shield } from "lucide-react";
 
 const Index = () => {
   const [proxyResult, setProxyResult] = useState<{ html: string; url: string } | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const navigateTo = useCallback(async (url: string) => {
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("proxy-fetch", {
+        body: { url },
+      });
+      if (error) throw error;
+      if (data?.error) {
+        toast.error(data.error);
+      } else if (data?.html) {
+        setProxyResult({ html: data.html, url: data.finalUrl });
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Failed to load");
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   return (
     <div className="relative min-h-screen flex flex-col items-center justify-center px-4 overflow-hidden">
@@ -32,7 +55,9 @@ const Index = () => {
           onResult={(html, url) => setProxyResult({ html, url })}
         />
 
-        <div className="grid grid-cols-3 gap-4 max-w-md mx-auto pt-8">
+        <QuickLinks onNavigate={navigateTo} isLoading={isLoading} />
+
+        <div className="grid grid-cols-3 gap-4 max-w-md mx-auto pt-4">
           {[
             { label: "Uptime", value: "99.9%" },
             { label: "Servers", value: "50+" },

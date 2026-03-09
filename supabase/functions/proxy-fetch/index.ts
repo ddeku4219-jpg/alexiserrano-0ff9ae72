@@ -79,25 +79,39 @@ function absUrl(url: string): string {
   return url;
 }
 
-// ── Cloudflare / bot-protection detection ──
-function isCloudflareChallenge(html: string, status: number): boolean {
-  if (status === 403 || status === 503) {
-    const markers = [
-      "cf-browser-verification",
-      "cf_chl_opt",
-      "challenge-platform",
-      "Just a moment",
-      "Checking your browser",
-      "cf-turnstile",
-      "Attention Required! | Cloudflare",
-      "_cf_chl_tk",
-      "ray ID",
-    ];
-    const lower = html.toLowerCase();
-    return markers.some(m => lower.includes(m.toLowerCase()));
+// ── Protection detection & empty-body detection ──
+function needsBrowserEngine(html: string, status: number): boolean {
+  const lower = html.toLowerCase();
+
+  // Cloudflare challenge markers
+  const cfMarkers = [
+    "cf-browser-verification", "cf_chl_opt", "challenge-platform",
+    "just a moment", "checking your browser", "cf-turnstile",
+    "attention required! | cloudflare", "_cf_chl_tk",
+  ];
+  if ((status === 403 || status === 503) && cfMarkers.some(m => lower.includes(m))) return true;
+  if (lower.includes("cf_chl_opt") || lower.includes("challenge-platform")) return true;
+
+  // DDoS-Guard / other bot protection
+  if (lower.includes("ddos-guard") || lower.includes("ddos protection")) return true;
+
+  // Detect JS-only shell pages (SPA with no real content in body)
+  // Strip scripts/styles/head, check if body has meaningful text
+  const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+  if (bodyMatch) {
+    const bodyContent = bodyMatch[1]
+      .replace(/<script[\s\S]*?<\/script>/gi, "")
+      .replace(/<style[\s\S]*?<\/style>/gi, "")
+      .replace(/<[^>]+>/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    // If body has very little visible text, it's likely a JS-rendered SPA
+    if (bodyContent.length < 100) return true;
   }
-  // Some sites return 200 but with a challenge page
-  if (html.includes("cf_chl_opt") || html.includes("challenge-platform")) return true;
+
+  // Empty or near-empty response
+  if (html.trim().length < 500) return true;
+
   return false;
 }
 
@@ -483,9 +497,9 @@ serve(async (req) => {
       if (ct.includes("text/html") || ct.includes("application/xhtml")) {
         let html = await res.text();
 
-        // Detect Cloudflare challenge → auto-fallback to Browserless
-        if (isCloudflareChallenge(html, res.status) && BROWSERLESS_API_KEY && !useBrowser) {
-          console.log(`Cloudflare detected on ${resolved}, falling back to Browserless...`);
+        // Detect Cloudflare/bot-protection/empty SPA → auto-fallback to Browserless
+        if (needsBrowserEngine(html, res.status) && BROWSERLESS_API_KEY && !useBrowser) {
+          console.log(`Browser engine needed for ${resolved}, falling back to Browserless...`);
           try {
             const { html: browserHtml, finalUrl: browserFinalUrl } = await fetchWithBrowserless(resolved);
             const rewritten = rewriteHtml(browserHtml, browserFinalUrl);

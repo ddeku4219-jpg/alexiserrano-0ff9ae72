@@ -115,31 +115,51 @@ function needsBrowserEngine(html: string, status: number): boolean {
   return false;
 }
 
-// ── Browserless.io headless Chrome fetch ──
+// ── Browserless.io headless Chrome fetch (stealth mode) ──
 async function fetchWithBrowserless(url: string): Promise<{ html: string; finalUrl: string }> {
   if (!BROWSERLESS_API_KEY) {
     throw new Error("Browserless API key not configured");
   }
 
-  console.log(`Browserless → ${url}`);
+  console.log(`Browserless (stealth) → ${url}`);
 
-  // Use Browserless /content API to get fully rendered HTML
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 45000);
+  const timer = setTimeout(() => ctrl.abort(), 55000);
 
-  const res = await fetch(`https://chrome.browserless.io/content?token=${BROWSERLESS_API_KEY}`, {
+  // Use production stealth endpoint with Bearer auth
+  const res = await fetch(`https://production-sfo.browserless.io/content?token=${BROWSERLESS_API_KEY}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${BROWSERLESS_API_KEY}`,
+    },
     body: JSON.stringify({
       url,
-      waitForSelector: { selector: "body", timeout: 15000 },
+      // Stealth mode: bypass bot detection, Cloudflare, etc.
+      stealth: true,
+      bestAttempt: true,
+      // Wait for page to fully render
       gotoOptions: {
         waitUntil: "networkidle2",
-        timeout: 30000,
+        timeout: 40000,
       },
-      // Block unnecessary resources to speed things up
-      rejectResourceTypes: ["font"],
-      bestAttempt: true,
+      // Wait for meaningful content
+      waitForSelector: {
+        selector: "body *",
+        timeout: 20000,
+      },
+      // Set realistic viewport
+      viewport: {
+        width: 1920,
+        height: 1080,
+        deviceScaleFactor: 1,
+        isMobile: false,
+        hasTouch: false,
+        isLandscape: true,
+      },
+      // Human-like behavior
+      humanlike: true,
+      // Don't block any resource types — let everything load for full rendering
     }),
     signal: ctrl.signal,
   });

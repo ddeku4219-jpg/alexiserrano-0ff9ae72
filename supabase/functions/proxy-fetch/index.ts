@@ -497,9 +497,9 @@ serve(async (req) => {
       if (ct.includes("text/html") || ct.includes("application/xhtml")) {
         let html = await res.text();
 
-        // Detect Cloudflare challenge → auto-fallback to Browserless
-        if (isCloudflareChallenge(html, res.status) && BROWSERLESS_API_KEY && !useBrowser) {
-          console.log(`Cloudflare detected on ${resolved}, falling back to Browserless...`);
+        // Detect Cloudflare/bot-protection/empty SPA → auto-fallback to Browserless
+        if (needsBrowserEngine(html, res.status) && BROWSERLESS_API_KEY && !useBrowser) {
+          console.log(`Browser engine needed for ${resolved}, falling back to Browserless...`);
           try {
             const { html: browserHtml, finalUrl: browserFinalUrl } = await fetchWithBrowserless(resolved);
             const rewritten = rewriteHtml(browserHtml, browserFinalUrl);
